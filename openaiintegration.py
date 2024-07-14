@@ -1,16 +1,7 @@
 import streamlit as st
 import fitz  # PyMuPDF for handling PDFs
-import spacy
-from openai import OpenAI
-import tiktoken 
-import time
-
-# Initialize SpaCy model
-nlp = spacy.load('en_core_web_sm')
-
-# Set your OpenAI API key
-#openai.api_key = 'your-key-here'
-
+import requests
+import os
 
 # Function to read PDF files
 def read_pdf(file):
@@ -21,67 +12,118 @@ def read_pdf(file):
         text += page.get_text()
     return text
 
-    # Function to count tokens using tiktoken
-def count_tokens(text, model="gpt-3.5-turbo"):
-    enc = tiktoken.encoding_for_model(model)
-    tokens = enc.encode(text)
-    return len(tokens)
+# Function to extract skills using Gemini AI Studio API
+def extract_skills_with_gemini_api(text, api_key):
+    endpoint = "https://geminiapi.com/extract-skills"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "text": text
+    }
 
-
-
-# Function to extract skills using OpenAI
-def extract_skills_with_openai(text):
-    token_count = count_tokens(text)
-    st.write(f"Token count for resume text: {token_count}")
-    
-    if token_count > 4096:  # Token limit for gpt-3.5-turbo
-        st.error("The resume text is too long for the model to process. Please shorten the resume.")
+    try:
+        response = requests.post(endpoint, headers=headers, json=data)
+        response.raise_for_status()
+        skills = response.json().get("skills", [])
+        return skills
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to extract skills: {str(e)}")
         return []
 
-    completion = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are an assistant that extracts skills from resumes."},
-            {"role": "user", "content": f"Extract the skills from the following resume text:\n{text}"}
-        ]
-    )
-    
-    skills = completion.choices[0].message.content.strip().split('\n')
-    return skills
+# Function to recommend career paths using Gemini AI Studio API
+def recommend_career_with_gemini_api(skills, api_key):
+    endpoint = "https://geminiapi.com/recommend-careers"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "skills": skills
+    }
 
-# Function to recommend career paths using OpenAI
-def recommend_career_with_openai(skills):
-    skills_str = ', '.join(skills)
-    completion = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a career advisor."},
-            {"role": "user", "content": f"Given the following skills: {skills_str}, recommend some suitable career paths and explain why."}
-        ]
-    )
-    recommendations = completion.choices[0].message.content.strip()
-    return recommendations
+    try:
+        response = requests.post(endpoint, headers=headers, json=data)
+        response.raise_for_status()
+        recommendations = response.json().get("recommendations", "")
+        return recommendations
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to recommend career paths: {str(e)}")
+        return ""
 
 # Streamlit UI
-st.title("AI Career Advisor")
-st.write("Upload your resume to get personalized career recommendations.")
+st.set_page_config(
+    page_title="AI Career Advisor with Gemini AI Studio",
+    page_icon=":gemini:",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS styles for the application
+st.markdown(
+    """
+    <style>
+    .full-width {
+        width: 100%;
+        margin: auto;
+    }
+    .highlight-text {
+        color: #0066CC;
+        font-weight: bold;
+    }
+    .button-primary {
+        background-color: #0066CC;
+        color: white;
+        font-weight: bold;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    .button-primary:hover {
+        background-color: #0052a3;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# Main content of the application
+st.title("AI Career Advisor with Gemini AI Studio")
+st.markdown(
+    """
+    Upload your resume to get personalized career recommendations using Gemini AI Studio.
+    """
+)
 
 if 'resume_text' not in st.session_state:
     st.session_state.resume_text = ""
 if 'skills' not in st.session_state:
     st.session_state.skills = []
 
-uploaded_file = st.file_uploader("Choose a file", type=["pdf"], key="unique_file_uploader")
+# File uploader and processing logic
+uploaded_file = st.file_uploader("Choose a file (PDF format)", type=["pdf"], key="unique_file_uploader")
 
 if uploaded_file is not None:
     resume_text = read_pdf(uploaded_file)
     st.session_state.resume_text = resume_text
-    st.session_state.skills = extract_skills_with_openai(resume_text)
+    api_key = os.getenv("GEMINI_API_KEY")  # Replace with your actual environment variable name
+    st.session_state.skills = extract_skills_with_gemini_api(resume_text, api_key)
 
+# Display resume text and extracted skills
 if st.session_state.resume_text:
-    st.write("Resume Text:", st.session_state.resume_text)
-    st.write("Extracted Skills:", st.session_state.skills)
+    st.subheader("Resume Text:")
+    st.write(st.session_state.resume_text)
+    st.subheader("Extracted Skills:")
+    st.write(", ".join(st.session_state.skills))
 
-    if st.button("Get Career Recommendations", key="unique_recommend_button"):
-        recommendations = recommend_career_with_openai(st.session_state.skills)
-        st.write("Recommended Career Paths:", recommendations)
+    # Button for generating recommendations
+    button_col1, button_col2, button_col3 = st.columns(3)
+    with button_col2:
+        if st.button("Get Career Recommendations", key="unique_recommend_button"):
+            with st.spinner('Analyzing skills and generating recommendations...'):
+                api_key = os.getenv("GEMINI_API_KEY")  # Replace with your actual environment variable name
+                recommendations = recommend_career_with_gemini_api(st.session_state.skills, api_key)
+                st.subheader("Recommended Career Paths:")
+                st.write(recommendations)
+
